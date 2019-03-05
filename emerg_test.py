@@ -10,6 +10,7 @@ import struct
 import numpy as np
 import matplotlib.pyplot as plt
 import csv
+import os
 
 CHUNK = 1024
 WIDTH = 2
@@ -22,8 +23,9 @@ class NullDevice():
     def write(self, s):
         pass
 
+os.remove("result.csv")
 
-def clip_signal(signal, clipping_thresh=1000, clipped_value=215):
+def clip_signal(signal, rate, batch_size, clipping_thresh=1000, clipped_value=215):
     """
     Remove high frequency harmonics/noises   
     @params   
@@ -31,16 +33,16 @@ def clip_signal(signal, clipping_thresh=1000, clipped_value=215):
     clipping_thresh - Threshold frequency above which to clip   
     clipped_values - Value to which the signal is clipped   
     """
-    while np.argmax(signal) >= clipping_thresh:
+    index_factor = (rate / CHUNK) / batch_size
+    while index_factor * np.argmax(signal) >= clipping_thresh:
         signal[np.argmax(signal)] = 0
     return signal
 
-
-def process_batch(batch, chunk_no, write_csv = False):
-    index_factor = RATE / CHUNK
-    data_fft = np.fft.fft(data_np)
+def process_batch(batch, batch_size, chunk_no, write_csv = False):
+    index_factor = (RATE / CHUNK) / batch_size
+    data_fft = np.fft.fft(batch)
     data_freq = np.abs(data_fft)/len(data_fft) # Dividing by length to normalize the amplitude as per https://www.mathworks.com/matlabcentral/answers/162846-amplitude-of-signal-after-fft-operation
-    date_freq = clip_signal(data_freq,clipping_thresh=1000, clipped_value=215)
+    date_freq = clip_signal(data_freq, RATE, batch_size, clipping_thresh=1000, clipped_value=215)
 
     avg_mag = np.average(data_freq)
     max_freq = index_factor* np.argmax(data_freq)
@@ -50,14 +52,6 @@ def process_batch(batch, chunk_no, write_csv = False):
         with open("result.csv", mode='a') as writer_file:
             csv_writer = csv.writer(writer_file, delimiter=',', quotechar='"', quoting=csv.QUOTE_MINIMAL)
             csv_writer.writerow([chunk_no, max_freq, avg_mag, stdev])
-
-    # fig = plt.figure()
-    # ax = fig.add_subplot(1,1,1)
-    # x = np.array(range(len(data_freq)))    
-    # ax.plot( rate/CHUNK * x, data_freq)
-    # ax.set_xscale('log')
-    # plt.show()
-
     return max_freq, avg_mag, stdev
 
 p = pyaudio.PyAudio()
@@ -96,11 +90,13 @@ while True:
     batch_sequence = np.concatenate((batch_sequence,data_np))   # Collect signals for short duration and process as batches
     total_sequence = np.concatenate((total_sequence,data_np))   # Collect total signal so far
     maximum = average = stdev = 0
-    if i % 5 == 0:     #Approximately 100ms = 1 batch
-        maximum, average, stdev = process_batch(batch_sequence, i, write_csv=False)   # Process the signals collected so far
+    batch_size = 5
+
+    if i % batch_size == 0:     #Approximately 100ms = 1 batch
+        maximum, average, stdev = process_batch(batch_sequence, batch_size, i, write_csv=False)   # Process the signals collected so far
         batch_sequence=np.array([])     # And clear away that buffer
         
-        if maximum not in max_frequency_list:
+        if maximum not in max_frequency_list and i > batch_size-1:
             max_frequency_list = np.append(max_frequency_list, maximum)
         average_mag_list = np.append(average_mag_list,average)
         stdev_list = np.append(stdev_list, stdev)
@@ -114,7 +110,7 @@ while True:
         print("-----")
 
         decision = ""
-        for freq in [129, 258, 301, 215]:
+        for freq in [137, 275, 267]:
             if np.abs(freq-maximum) < 5 and global_std <= 5:
                 decision = "hum"
                 break            
@@ -124,7 +120,7 @@ while True:
         with open("result.csv", mode='a') as writer_file:
             csv_writer = csv.writer(writer_file, delimiter=',', quotechar='"', quoting=csv.QUOTE_MINIMAL)
             # csv_writer.writerow(["MAX_FREQ_SIZE","GLOBAL_AVG", "GLOBAL_STD"])
-            csv_writer.writerow([global_max_len, global_avg, global_std, decision ] )
+            csv_writer.writerow([max_frequency_list, global_avg, global_std, decision ] )
             csv_writer.writerow(["---","---", "---"])
 
     if i % 50 == 0: # Approx 1s, purge lists
