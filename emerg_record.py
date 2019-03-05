@@ -4,13 +4,23 @@ import pyaudio
 import wave
 import numpy as np
 import struct
+import sys
+import time
 
 CHUNK = 1024
 FORMAT = pyaudio.paInt16
 CHANNELS = 2
 RATE = 44100
 RECORD_SECONDS = 3
-WAVE_OUTPUT_FILENAME = "output.wav"
+
+
+
+if len(sys.argv) < 2:
+    print("Records a wave file.\n\nUsage: %s filename.wav" % sys.argv[0])
+    sys.exit(-1)
+
+subject = sys.argv[1]
+WAVE_OUTPUT_FILENAME = "output/"+ subject + ".wav"
 
 p = pyaudio.PyAudio()
 
@@ -33,11 +43,11 @@ for i in range(0, int(RATE / CHUNK * RECORD_SECONDS)):
     print("Chunk: {} max_freq: {}".format(i,RATE/CHUNK* np.argmax(data_freq)))
     frames.append(data)
 
-print("* done recording")
 
 stream.stop_stream()
 stream.close()
 p.terminate()
+
 
 wf = wave.open(WAVE_OUTPUT_FILENAME, 'wb')
 wf.setnchannels(CHANNELS)
@@ -45,3 +55,16 @@ wf.setsampwidth(p.get_sample_size(FORMAT))
 wf.setframerate(RATE)
 wf.writeframes(b''.join(frames))
 wf.close()
+
+
+print("")
+print("")
+print("* done recording")
+print("")
+print("")
+print("Starting evaluation")
+print("")
+time.sleep(2)
+
+import emerg_evaluate
+emerg_evaluate.evaluate_wave(subject, plot = True)

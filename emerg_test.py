@@ -10,6 +10,11 @@ import struct
 import numpy as np
 import matplotlib.pyplot as plt
 import csv
+import os
+
+
+if os.path.exists("results.csv"):
+    os.remove("result.csv")
 
 CHUNK = 1024
 WIDTH = 2
@@ -22,6 +27,23 @@ class NullDevice():
     def write(self, s):
         pass
 
+if len(sys.argv) < 2:
+    print("Live test, need subject name.\n\nUsage: %s filename.wav" % sys.argv[0])
+    sys.exit(-1)
+
+SUBJECT_FREQ_LIST = []
+subject = sys.argv[1]
+freq_file = "output/"+ subject + "_freqs.csv"
+print(freq_file)
+with open(freq_file) as reader:
+    csv_reader = csv.reader(reader, delimiter=',', quotechar='"', quoting=csv.QUOTE_MINIMAL)
+    for row in csv_reader:
+        for freq in row:
+            rounded = int(float(freq))
+            if rounded not in SUBJECT_FREQ_LIST:
+                SUBJECT_FREQ_LIST.append( rounded )
+
+print(SUBJECT_FREQ_LIST)
 
 def clip_signal(signal, clipping_thresh=1000, clipped_value=215):
     """
@@ -50,14 +72,6 @@ def process_batch(batch, chunk_no, write_csv = False):
         with open("result.csv", mode='a') as writer_file:
             csv_writer = csv.writer(writer_file, delimiter=',', quotechar='"', quoting=csv.QUOTE_MINIMAL)
             csv_writer.writerow([chunk_no, max_freq, avg_mag, stdev])
-
-    # fig = plt.figure()
-    # ax = fig.add_subplot(1,1,1)
-    # x = np.array(range(len(data_freq)))    
-    # ax.plot( rate/CHUNK * x, data_freq)
-    # ax.set_xscale('log')
-    # plt.show()
-
     return max_freq, avg_mag, stdev
 
 p = pyaudio.PyAudio()
@@ -88,7 +102,6 @@ with open("result.csv", mode='a') as writer_file:
     csv_writer = csv.writer(writer_file, delimiter=',', quotechar='"', quoting=csv.QUOTE_MINIMAL)
     csv_writer.writerow(["MAX_FREQ_SIZE","GLOBAL_AVG", "GLOBAL_STD"])
 i = 0
-# for i in range(0, int(RATE / CHUNK * RECORD_SECONDS)):
 while True:
     data = stream.read(CHUNK)
     data_unpacked = struct.unpack('{n}h'.format(n= len(data)/2 ), data) 
@@ -114,7 +127,7 @@ while True:
         print("-----")
 
         decision = ""
-        for freq in [129, 258, 301, 215]:
+        for freq in SUBJECT_FREQ_LIST:
             if np.abs(freq-maximum) < 5 and global_std <= 5:
                 decision = "hum"
                 break            
@@ -123,8 +136,7 @@ while True:
 
         with open("result.csv", mode='a') as writer_file:
             csv_writer = csv.writer(writer_file, delimiter=',', quotechar='"', quoting=csv.QUOTE_MINIMAL)
-            # csv_writer.writerow(["MAX_FREQ_SIZE","GLOBAL_AVG", "GLOBAL_STD"])
-            csv_writer.writerow([global_max_len, global_avg, global_std, decision ] )
+            csv_writer.writerow([max_frequency_list, global_avg, global_std, decision ] )
             csv_writer.writerow(["---","---", "---"])
 
     if i % 50 == 0: # Approx 1s, purge lists
@@ -139,7 +151,6 @@ while True:
 
         with open("result.csv", mode='a') as writer_file:
             csv_writer = csv.writer(writer_file, delimiter=',', quotechar='"', quoting=csv.QUOTE_MINIMAL)
-            # csv_writer.writerow(["MAX_FREQ_SIZE","GLOBAL_AVG", "GLOBAL_STD"])
             csv_writer.writerow(["PURGE"] )
             csv_writer.writerow(["---","---", "---"])
 
@@ -147,29 +158,6 @@ while True:
 
     stream.write(data, CHUNK)
     i += 1
-
-print("* done")
-
-
-data_fft = np.fft.fft(total_sequence)
-data_freq = np.abs(data_fft)
-data_freq = data_freq/len(data_fft) # Dividing by length to normalize the amplitude as per https://www.mathworks.com/matlabcentral/answers/162846-amplitude-of-signal-after-fft-operation
-average_mag = np.average(data_freq)
-
-index_factor = RATE / (CHUNK*i)
-
-max_freq = index_factor * np.argmax(data_freq)
-print("Average mag norm : {}".format(average_mag))
-print("Max freq : {}".format(max_freq))
-
-x = np.array(range(len(data_freq)))
-x = index_factor * x
-fig = plt.figure()
-ax = fig.add_subplot(1,1,1)
-ax.plot(x, data_freq)
-ax.set_xscale('log')
-plt.show()
-
 
 stream.stop_stream()
 stream.close()
