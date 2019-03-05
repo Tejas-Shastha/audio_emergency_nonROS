@@ -1,8 +1,4 @@
-"""PyAudio Example: Play a WAVE file."""
-
-# Sample duration * sampling frequency = total number of samples = 220500
-# Total number of samples / chunk size = number of chunks = 215.33
-# Sample duration / number of chunks = chunk duration = 23.22 ms
+"""PyAudio example: Record a few seconds of audio and save to a WAVE file."""
 
 import pyaudio
 import wave
@@ -11,10 +7,6 @@ import struct
 import numpy as np
 import matplotlib.pyplot as plt
 import csv
-
-CHUNK = 1024
-
-
 
 def clip_signal(signal, clipping_thresh=1000, clipped_value=215):
     """
@@ -45,36 +37,32 @@ def process_batch(batch, chunk_no, write_csv = False):
         with open("report.csv", mode='a') as writer_file:
             csv_writer = csv.writer(writer_file, delimiter=',', quotechar='"', quoting=csv.QUOTE_MINIMAL)
             csv_writer.writerow([chunk_no, max_freq, avg_mag, stdev])
-
-    # fig = plt.figure()
-    # ax = fig.add_subplot(1,1,1)
-    # x = np.array(range(len(data_freq)))    
-    # ax.plot( rate/CHUNK * x, data_freq)
-    # ax.set_xscale('log')
-    # plt.show()
-
     return max_freq, max_amp, avg_mag, stdev
 
 if len(sys.argv) < 2:
-    print("Plays a wave file.\n\nUsage: %s filename.wav" % sys.argv[0])
+    print("Record to a wav file and extract dominant frequencies.\n\nUsage: %s filename.wav" % sys.argv[0])
     sys.exit(-1)
 
-# with open("output.csv", mode='a') as writer_file:
-#     csv_writer = csv.writer(writer_file, delimiter=',', quotechar='"', quoting=csv.QUOTE_MINIMAL)
-#     csv_writer.writerow([sys.argv[1]])
-#     csv_writer.writerow(['CHUNK','MAX FREQ', 'AVG', 'STDEV'])
-
-wf = wave.open(sys.argv[1], 'rb')
+CHUNK = 1024
+FORMAT = pyaudio.paInt16
+CHANNELS = 2
+RATE = 44100
+rate = RATE
+RECORD_SECONDS = 3
+WAVE_OUTPUT_FILENAME = sys.argv[1]
 
 p = pyaudio.PyAudio()
-rate = float(wf.getframerate())
 
-stream = p.open(format=p.get_format_from_width(wf.getsampwidth()),
-                channels=wf.getnchannels(),
-                rate=wf.getframerate(),
-                output=True)
+stream = p.open(format=FORMAT,
+                channels=CHANNELS,
+                rate=RATE,
+                input=True,
+                frames_per_buffer=CHUNK)
 
-data = wf.readframes(CHUNK)
+print("* recording")
+
+frames = []
+unpacked_frames = []
 
 i = 0
 batch_sequence = np.array([])
@@ -88,14 +76,13 @@ global_max_len = 0
 global_avg = 0
 global_std = 0
 
-
-print("")
-print("")
-print("")
-while data != '':
-    data_unpacked = struct.unpack('{n}h'.format(n= len(data)/2 ), data) 
+for i in range(0, int(RATE / CHUNK * RECORD_SECONDS)):
+    data = stream.read(CHUNK)
+    data_unpacked = struct.unpack('{n}h'.format(n= len(data)/2 ), data)    
     data_np = np.array(data_unpacked)
-    batch_sequence = np.concatenate((batch_sequence,data_np))   # Collect signals for short duration and process as batches
+    frames.append(data)
+    unpacked_frames.append(data_unpacked)
+    batch_sequence = np.concatenate((batch_sequence,data_np))   # Collect signals for short duration and process as 
     total_sequence = np.concatenate((total_sequence,data_np))   # Collect total signal so far
     if i % 5 == 0:     #Approximately 100ms
         maximum, amp_max, average, stdev = process_batch(batch_sequence, i, write_csv=False)   # Process the signals collected so far
@@ -114,16 +101,7 @@ while data != '':
         print("Global max len: {} avg: {} std: {}".format(global_max_len, global_avg, global_std))
         print("-----")
 
-        # with open("output.csv", mode='a') as writer_file:
-        #     csv_writer = csv.writer(writer_file, delimiter=',', quotechar='"', quoting=csv.QUOTE_MINIMAL)
-        #     csv_writer.writerow(["MAX_FREQ_SIZE","GLOBAL_AVG", "GLOBAL_STD"])
-        #     csv_writer.writerow([len(max_frequency_list), np.average(average_mag_list), np.std(stdev_list) ] )
-        #     csv_writer.writerow(["---","---", "---"])
-
-
-    stream.write(data)
-    data = wf.readframes(CHUNK)
-    i += 1
+print("* done recording")
 
 print("")
 print("")
@@ -132,13 +110,11 @@ print("Global average:{}".format( global_avg ))
 print("Global stdev:{}".format( global_std ))
 print("Robot noise freq list: [344.53125     86.1328125  258.3984375  215.33203125 129.19921875 172.265625    43.06640625 861.328125  ]")
 
-# with open("output.csv", mode='a') as writer_file:
-#     csv_writer = csv.writer(writer_file, delimiter=',', quotechar='"', quoting=csv.QUOTE_MINIMAL)
-#     csv_writer.writerow(["MAX_FREQ_SIZE","GLOBAL_AVG", "GLOBAL_STD"])
-#     csv_writer.writerow([len(max_frequency_list), np.average(average_mag_list), np.std(stdev_list) ] )
-#     csv_writer.writerow(["---","---", "---"])
+print(total_sequence.shape)
 
-data_fft = np.fft.fft(total_sequence)
+data_fft = np.fft.fft(np.array(total_sequence))
+
+print(data_fft)
 data_freq = np.abs(data_fft)
 data_freq = data_freq/len(data_fft) # Dividing by length to normalize the amplitude as per https://www.mathworks.com/matlabcentral/answers/162846-amplitude-of-signal-after-fft-operation
 date_freq = clip_signal(data_freq,clipping_thresh=len(data_fft)*0.8, clipped_value=215)
@@ -157,10 +133,19 @@ x = index_factor * x
 fig = plt.figure()
 ax = fig.add_subplot(1,1,1)
 ax.plot(x, data_freq)
-ax.set_xscale('log')
+# ax.set_xscale('log')
 plt.show()
+
 
 stream.stop_stream()
 stream.close()
-
 p.terminate()
+
+wf = wave.open(WAVE_OUTPUT_FILENAME, 'wb')
+wf.setnchannels(CHANNELS)
+wf.setsampwidth(p.get_sample_size(FORMAT))
+wf.setframerate(RATE)
+wf.writeframes(b''.join(frames))
+wf.close()
+
+
